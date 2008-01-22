@@ -2,7 +2,7 @@
 # > copyrite 2008 chris wanstrath
 # < chris[at]ozmm[dot]org
 # > MIT License 
-%w( rubygems open-uri erb timeout sinatra sequel mofo open3 ).each { |f| require f }
+%w( rubygems open-uri erb timeout sinatra sequel mofo open3 open4 ).each { |f| require f }
 gem 'mofo', '>= 0.2.11'
 Mofo.timeout = 10
 
@@ -17,6 +17,16 @@ def timeout(time = 5, &block)
   Timeout.timeout(time, &block)
 rescue Timeout::Error
   nil
+end
+
+def timeout_exec(command)
+  pid = nil
+  Timeout.timeout(5) do
+    pid, _, stdout, _ = Open4.popen4(*command.split(' '))
+    stdout.read
+  end
+rescue Timeout::Error
+  Process.kill('HUP', pid)
 end
 
 ##
@@ -41,7 +51,8 @@ class Item < Sequel::Model
   end
 
   def self.is_svn?(url)
-    timeout { `/usr/bin/env svn info #{url}` =~ /Path:/ }
+    info = timeout_exec "/usr/bin/env svn info #{url}" 
+    info =~ /Path:/
   end
 
   def self.find_or_create_by_url(url)
@@ -139,20 +150,30 @@ def render_svn_feed(item)
   xslt_file = "/tmp/tmp-#{item.key}.xslt"
   erb_file  = "#{File.expand_path(File.dirname(__FILE__))}/templates/svnlog.erb"
 
+  cleanup = proc { rm tmp_file, xslt_file }
+
   File.open(xslt_file, 'w') do |file|
     file.puts ERB.new(File.read(erb_file)).result(binding)
   end
 
   File.open(tmp_file, 'w') do |f|
-    timeout { f.puts `/usr/bin/env svn log #{item.url.gsub(/ |\\|;/,'')} --limit 15 -v --xml` }
+    value = timeout_exec "/usr/bin/env svn log #{item.url.gsub(/ |\\|;/,'')} --limit 15 -v --xml"
+    return cleanup[] if value.nil?
+    f.puts value
   end
 
   File.open(@file, 'w') do |f|
-    timeout { f.puts `/usr/bin/env xsltproc #{xslt_file} #{tmp_file}` }
+    value = timeout_exec "/usr/bin/env xsltproc #{xslt_file} #{tmp_file}"
+    return cleanup[] if value.nil?
+    f.puts value
   end
 
-  `rm #{tmp_file} #{xslt_file}`
+  cleanup[]
   sendfile @file
+end
+
+def rm(*files)
+  `rm #{files.join(' ')}`
 end
 
 def render_atom_feed(item)
