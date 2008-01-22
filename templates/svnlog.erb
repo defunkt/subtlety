@@ -14,11 +14,11 @@ Tested with libxslt.
     <xsl:template match="log">
       <rss version="2.0">
            <channel>
-                <title>subtle rss feed for <%= @repository.url %></title> <!-- put your repository name here -->
-                <link><%= @repository.url %></link> <!-- put your project homepage here -->
+                <title>subtle rss feed for <%= item.url %></title> 
+                <link><%= item.url %></link> 
                 <description>a subtle svn commit log, rss-style</description>
                 <language>en-us</language>
-                <copyright>2006 <%= @repository.url %></copyright> <!-- put your company here -->
+                <copyright>2008 <%= item.url %></copyright> 
                 <generator>svnlog.xslt</generator>
                 <xsl:apply-templates select="logentry" />
            </channel>
@@ -33,9 +33,9 @@ Tested with libxslt.
                 <xsl:with-param name="isodate" select="date" />
             </xsl:call-template>
            </pubDate>
-           <guid isPermaLink="false"><%= @repository.url %>?changeset=<xsl:value-of select="@revision"/></guid>
+           <guid isPermaLink="false"><%= item.url %>?changeset=<xsl:value-of select="@revision"/></guid>
            <!-- Accoring to RSS 2.0 specs, author has to be an rfc822 valid email address -->
-           <author><xsl:value-of select="author" />@<%= @repository.url.gsub(/(svn|http):\/\//, '').split('/').first %></author> <!-- put your domain here -->
+           <author><xsl:value-of select="author" />@<%= item.url.gsub(/(svn|http):\/\//, '').split('/').first %></author> <!-- put your domain here -->
            <description disable-output-escaping="yes">&lt;div style="white-space:pre"&gt;<xsl:value-of select="msg" />&lt;/div&gt;&lt;br/&gt;
                 (&lt;em&gt;<xsl:call-template name="rfc822">
                     <xsl:with-param name="isodate" select="date" />
@@ -47,7 +47,7 @@ Tested with libxslt.
          
     <xsl:template match="paths/path">
         &lt;tr&gt;&lt;td&gt;&lt;strong&gt;<xsl:call-template name="svncommand"><xsl:with-param name="command" select="@action" /></xsl:call-template>&lt;/strong&gt;&lt;/td&gt;
-        &lt;td&gt;&amp;nbsp;&lt;a href="<%= @repository.url.sub(/\/$/, '') %><xsl:value-of select="."/>"&gt;<xsl:value-of select="."/>&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt; <!-- put link to your repository here -->
+        &lt;td&gt;&amp;nbsp;&lt;a href="<%= item.url.sub(/\/$/, '') %><xsl:value-of select="."/>"&gt;<xsl:value-of select="."/>&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt; <!-- put link to your repository here -->
     </xsl:template>
 
     <xsl:template name="rfc822">
