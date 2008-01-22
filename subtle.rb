@@ -2,7 +2,8 @@
 # > copyrite 2008 chris wanstrath
 # < chris[at]ozmm[dot]org
 # > MIT License 
-%w( rubygems erb timeout sinatra sequel mofo open3 ).each { |f| require f }
+%w( rubygems open-uri erb timeout sinatra sequel mofo open3 ).each { |f| require f }
+gem 'mofo', '>= 0.2.11'
 Mofo.timeout = 10
 
 sessions :off
@@ -111,7 +112,7 @@ post '/s' do
   else
     text = <<-end_html
     <p class="highlight">
-      Sorry, there was some kind of error.  Are you sure your repository url's valid?  Does it start with svn:// or http://?
+      Sorry, there was some kind of error.  Are you sure your url's valid?  Does it start with svn:// or http://?
     </p>
     #{Helpers.form}
     end_html
@@ -155,21 +156,15 @@ def render_svn_feed(item)
 end
 
 def render_atom_feed(item)
-  tmp_file  = "/tmp/tmp-#{item.key}.xml"
-  xslt_file = "#{File.expand_path(File.dirname(__FILE__))}/templates/hAtom2Atom.xsl"
+  entries = hEntry.find(item.url)
 
-  timeout { `/usr/bin/env wget #{item.url.gsub(/ |\\|;/,'')} -q -O #{tmp_file}` }
-
-  xslt = "/usr/bin/env xsltproc #{xslt_file} #{tmp_file}"
-  _, stdout, stderr = timeout { Open3.popen3(*xslt.split(' ')) }
-
-  `rm #{tmp_file}`
-
-  if err = stderr.read
-    erb %(<h3>Error Atomizing #{item.url}:</h3><p>#{h(err).gsub("\n", '<br/>')}</p>)
+  if entries.nil? || entries.empty?
+    erb %(<h3>Error Atomizing #{item.url}!</h3><p>Couldn't find or parse hAtom.</p>)
   else
-    File.open(@file, 'w') { |f| f.puts stdout.read }
-    sendfile @file
+    feed = entries.to_atom.strip
+    File.open(@file, 'w') { |f| f.puts feed }
+    xml!
+    feed
   end
 end
 
