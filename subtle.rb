@@ -166,11 +166,15 @@ def render_atom_feed(item)
   `rm #{tmp_file}`
 
   if err = stderr.read
-    erb %(<h3>Error Atomizing #{item.url}:</h3><p>#{err.gsub("\n", '<br/>')}</p>)
+    erb %(<h3>Error Atomizing #{item.url}:</h3><p>#{h(err).gsub("\n", '<br/>')}</p>)
   else
     File.open(@file, 'w') { |f| f.puts stdout.read }
     sendfile @file
   end
+end
+
+def h(text)
+  ERB::Util.h(text)
 end
 
 def xml!
@@ -283,4 +287,3 @@ layout do
   </html>
   end_html
 end
-
