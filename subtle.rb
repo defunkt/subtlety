@@ -2,15 +2,18 @@
 # > copyrite 2008 chris wanstrath
 # < chris[at]ozmm[dot]org
 # > MIT License 
-%w( rubygems erb timeout sinatra sequel open3 ).each { |f| require f }
+%w( rubygems erb timeout sinatra sequel mofo open3 ).each { |f| require f }
+Mofo.timeout = 10
+
+sessions :off
 
 # hax.
 class String;  def compact; gsub(/(\s{2,})/, ' ').gsub("\n", '') end end
 module Kernel; def `(string) Open3.popen3(*string.split(' '))[1].read end end
 class Integer; def minutes; self * 60 end; def ago; Time.now - self end end
 
-def timeout(&block)
-  Timeout.timeout(5, &block)
+def timeout(time = 5, &block)
+  Timeout.timeout(time, &block)
 rescue Timeout::Error
   nil
 end
@@ -28,20 +31,24 @@ class Item < Sequel::Model
           index [ :url, :atom ]
   end
 
-  def key
-    pk.to_s(16)
+  def key; pk.to_s(16) end
+  def atom?; atom end
+  def full_url; "http://subtlety.errtheblog.com/O_o/#{key}.xml" end
+
+  def self.is_hAtom?(url)
+    Array(hEntry.find(url)).any?
   end
 
-  def full_url
-    "http://subtlety.errtheblog.com/O_o/#{key}.xml"
+  def self.is_svn?(url)
+    timeout { `/usr/bin/env svn info #{url}` =~ /Path:/ }
   end
 
-  def self.find_or_create_by_url(url, atom = false)
-    if model = self[:url => url, :atom => atom]
+  def self.find_or_create_by_url(url)
+    if model = self[:url => url]
       return model
     end
 
-    return unless url =~ /^(svn|http):\/\/(\w|\.|\/|-)+$/ && timeout { `/usr/bin/env svn info #{url}` =~ /Path:/ }
+    return unless url =~ /^(svn|http):\/\/(\w|\.|\/|-)+$/ && (is_svn?(url) || atom = is_hAtom?(url))
 
     create(:url => url, :created_at => Time.now, :atom => atom) 
   end
@@ -55,17 +62,29 @@ Item.create_table unless Item.table_exists?
 get '/' do
   index = %Q[
     <p class="first">
-      Welcome.  Here's what we do: we take a remote, public subversion repository (http:// or svn://) and give you an rss feed of
-      the changes.  That's it.  Have an <strong>svn:external</strong> or <strong><a href="http://piston.rubyforge.org/">pistonized</a></strong> 
-      repository in your app you need to monitor?  Look no further: just plug in the repository's location and start reveling in the
-      sweet, sweet changesets, rss-style.  
+      Welcome to Subtlety 2.  We do two, distinct things:
     </p>
+    <ol>
+      <li> Take a remote, public subversion repository (http:// or svn://) and produce an RSS feed of the changes. </li>
+      <li> Take a page imbued with <a href="http://microformats.org/wiki/hatom">hAtom</a> and produce an equivalent Atom feed. </li>
+    </ol>
+    <p>
+       Have an <strong>svn:external</strong> or <strong><a href="http://piston.rubyforge.org/">pistonized</a></strong> 
+      repository in your app you need to monitor?  Look no further: plug in the repository's location and start reveling in the
+      sweet, sweet changesets. 
+    </p>
+    <p>
+      Hate the overhead of coding an RSS feed for your blog when the information is right there in the HTML?  We do, too.
+      Plug in the hAtom'd URL, point something like Feedburner at it, then sit back and relax.
     <p>
       The inaugural blog entry <a href="http://errtheblog.com/post/701">is here</a>.
     </p>
     <p>
-      One thing: please add the repository's root path.  So, svn://errtheblog.com/svn/mofo, <strong>not</strong> 
-      svn://errtheblog.com/svn/mofo/trunk.  Thanks, and enjoy.
+      (Oh, one thing: when going the SVN route, please add the repository's root path.  So, svn://errtheblog.com/svn/plugins, <strong>not</strong> 
+      svn://errtheblog.com/svn/plugins/will_paginate.)
+    </p>
+    <p>
+      Thanks, and enjoy.
     </p>
   ] << Helpers.form
 
@@ -75,16 +94,18 @@ end
 post '/s' do
   url   = params[:feed].chomp('/')
   @item = Item.find_or_create_by_url(url)
-  @rss  = "/O_o/#{@item.key}" if @item
+  @rss  = @item.full_url if @item
 
   if @rss
+    message = if @item.atom?
+      "Here it is, your very own Atom feed from <strong>#{@item.url}</strong>: "
+    else
+      "Here it is, your very own RSS feed of the changes committed to <strong>#{@item.url}</strong>: "
+    end
+
     text = <<-end_html
-    <p class="first">
-      Here it is, your very own RSS feed of the changes committed to <strong>#{@item.url}</strong>:
-    </p>
-    <h3>
-      <a href="#{@item.full_url}">#{@item.full_url}</a>
-    </h3>
+    <p class="first">#{message}</p>
+    <h3> <a href="#{@item.full_url}">#{@item.full_url}</a> </h3>
     &laquo; <a href="/">back home.</a>
     end_html
   else
@@ -101,7 +122,6 @@ end
 
 get '/O_o/:key.xml' do 
   key = params[:key]
-  @headers['Content-Type'] = 'application/xml'
   if File.exists?(@file = "feeds/#{key.gsub(/\W/,'')}.xml") && File.mtime(@file) > 15.minutes.ago
     sendfile @file
   else
@@ -110,33 +130,56 @@ get '/O_o/:key.xml' do
 end
 
 def render_feed(item)
+  item.atom? ? render_atom_feed(item) : render_svn_feed(item)
+end
+
+def render_svn_feed(item)
   tmp_file  = "/tmp/tmp-#{item.key}.xml"
-  dir       = File.expand_path(File.dirname(__FILE__))
-  erb_file  = "#{dir}/templates/svnlog.erb"
-  xslt_file = "#{dir}/tmp/svnlog-#{item.key}.xslt"
+  xslt_file = "/tmp/tmp-#{item.key}.xslt"
+  erb_file  = "#{File.expand_path(File.dirname(__FILE__))}/templates/svnlog.erb"
 
   File.open(xslt_file, 'w') do |file|
     file.puts ERB.new(File.read(erb_file)).result(binding)
   end
 
   File.open(tmp_file, 'w') do |f|
-    timeout do
-      f.puts `/usr/bin/env svn log #{item.url.gsub(/ |\\|;/,'')} --limit 15 -v --xml`
-    end
+    timeout { f.puts `/usr/bin/env svn log #{item.url.gsub(/ |\\|;/,'')} --limit 15 -v --xml` }
   end
 
   File.open(@file, 'w') do |f|
-    timeout do
-      f.puts `/usr/bin/env xsltproc #{xslt_file} #{tmp_file}`
-    end
+    timeout { f.puts `/usr/bin/env xsltproc #{xslt_file} #{tmp_file}` }
   end
 
   `rm #{tmp_file} #{xslt_file}`
   sendfile @file
 end
 
+def render_atom_feed(item)
+  tmp_file  = "/tmp/tmp-#{item.key}.xml"
+  xslt_file = "#{File.expand_path(File.dirname(__FILE__))}/templates/hAtom2Atom.xsl"
+
+  File.open(tmp_file, 'w') do |f|
+    timeout { f.puts `/usr/bin/env wget #{item.url.gsub(/ |\\|;/,'')} -O #{tmp_file}` }
+  end
+
+  xslt = "/usr/bin/env xsltproc #{xslt_file} #{tmp_file}"
+  _, stdout, stderr = timeout { Open3.popen3(*xslt.split(' ')) }
+
+  if err = stderr.read
+    erb %(<p class="highlight">#{err}</p>)
+  else
+    File.open(@file, 'w') { |f| f.puts stdout.read }
+    sendfile @file
+  end
+end
+
+def xml!
+  @headers['Content-Type'] = 'application/xml'
+end
+
 config_for :development do
   def sendfile(file)
+    xml!
     return if file.include? '..'
     File.read(file)
   end
@@ -149,6 +192,7 @@ end
 
 config_for :production do
   def sendfile(file)
+    xml!
     return if file.include? '..'
     @headers['X-Accel-Redirect'] = "/static/#{file}"
   end
@@ -163,7 +207,7 @@ module Helpers
 
   def form
     <<-end_form
-    <h3>create an rss feed from a public subversion repository:</h3>
+    <h3> create a feed from a public subversion repository or hAtom'd page: </h3>
     <form id="feed-me" method="post" action="/s">
       <p><input class="normal" type="text" name="feed" size="61" value="<%= @repository ? @repository.url : '' %>" /></p>
       <p><input type="submit" value="feed me."/></p>
@@ -225,7 +269,7 @@ layout do
     <body>
       <div class="wrap">
         <div class="header">
-          <h1>subtlety 2.</h1>
+          <h1>subtlety two.</h1>
         </div>
         <div class="main">
           <%= yield.compact %>
