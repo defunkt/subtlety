@@ -158,15 +158,15 @@ def render_atom_feed(item)
   tmp_file  = "/tmp/tmp-#{item.key}.xml"
   xslt_file = "#{File.expand_path(File.dirname(__FILE__))}/templates/hAtom2Atom.xsl"
 
-  File.open(tmp_file, 'w') do |f|
-    timeout { f.puts `/usr/bin/env wget #{item.url.gsub(/ |\\|;/,'')} -O #{tmp_file}` }
-  end
+  timeout { `/usr/bin/env wget #{item.url.gsub(/ |\\|;/,'')} -q -O #{tmp_file}` }
 
   xslt = "/usr/bin/env xsltproc #{xslt_file} #{tmp_file}"
   _, stdout, stderr = timeout { Open3.popen3(*xslt.split(' ')) }
 
+  `rm #{tmp_file}`
+
   if err = stderr.read
-    erb %(<p class="highlight">#{err}</p>)
+    erb %(<h3>Error Atomizing #{item.url}:</h3><p>#{err.gsub("\n", '<br/>')}</p>)
   else
     File.open(@file, 'w') { |f| f.puts stdout.read }
     sendfile @file
