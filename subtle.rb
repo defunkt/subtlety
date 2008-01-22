@@ -156,12 +156,14 @@ def render_svn_feed(item)
 end
 
 def render_atom_feed(item)
-  entries = hEntry.find(item.url)
+  website = timeout { open(item.url).read }
+  title   = Hpricot(website).at(:title).innerHTML
+  entries = hEntry.find(:all => { :text => website }, :base => item.url)
 
   if entries.nil? || entries.empty?
     erb %(<h3>Error Atomizing #{item.url}!</h3><p>Couldn't find or parse hAtom.</p>)
   else
-    feed = entries.to_atom.strip
+    feed = entries.to_atom(:title => title).strip
     File.open(@file, 'w') { |f| f.puts feed }
     xml!
     feed
