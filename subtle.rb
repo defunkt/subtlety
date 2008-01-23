@@ -27,6 +27,8 @@ def timeout_exec(command)
   end
 rescue Timeout::Error
   Process.kill('HUP', pid)
+ensure
+  Process.detach(pid)
 end
 
 ##
@@ -37,9 +39,10 @@ class Item < Sequel::Model
   set_schema do
     primary_key :id
          string :url
-        boolean :atom, :default => false
       timestamp :created_at
-          index [ :url, :atom ]
+      timestamp :updated_at
+        boolean :atom, :default => false
+          index :url
   end
 
   def key; pk.to_s(16) end
@@ -199,13 +202,13 @@ def xml!
   @headers['Content-Type'] = 'application/xml'
 end
 
-config_for :development do
-  def sendfile(file)
-    xml!
-    return if file.include? '..'
-    File.read(file)
-  end
+def sendfile(file)
+  xml!
+  return if file.include? '..'
+  File.read(file)
+end
 
+config_for :development do
   get '/images/diag.gif' do
     @headers['Content-Type'] = 'image/gif'
     File.read('images/diag.gif')
@@ -213,11 +216,8 @@ config_for :development do
 end
 
 config_for :production do
-  def sendfile(file)
-    xml!
-    return if file.include? '..'
-    @headers['X-Accel-Redirect'] = "/static/#{file}"
-  end
+  get(404) { '' }
+  get(500) { '' }
 end
 
 module Helpers
